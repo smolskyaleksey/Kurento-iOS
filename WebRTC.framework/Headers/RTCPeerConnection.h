@@ -23,7 +23,7 @@
 @class RTCRtpReceiver;
 @class RTCRtpSender;
 @class RTCSessionDescription;
-@class RTCStatsReport;
+@class RTCLegacyStatsReport;
 
 NS_ASSUME_NONNULL_BEGIN
 
@@ -115,7 +115,7 @@ RTC_EXPORT
  *  streams being added or removed.
  */
 @property(nonatomic, weak, nullable) id<RTCPeerConnectionDelegate> delegate;
-@property(nonatomic, readonly) NSArray *localStreams;
+@property(nonatomic, readonly) NSArray<RTCMediaStream *> *localStreams;
 @property(nonatomic, readonly, nullable)
     RTCSessionDescription *localDescription;
 @property(nonatomic, readonly, nullable)
@@ -123,6 +123,7 @@ RTC_EXPORT
 @property(nonatomic, readonly) RTCSignalingState signalingState;
 @property(nonatomic, readonly) RTCIceConnectionState iceConnectionState;
 @property(nonatomic, readonly) RTCIceGatheringState iceGatheringState;
+@property(nonatomic, readonly, copy) RTCConfiguration *configuration;
 
 /** Gets all RTCRtpSenders associated with this peer connection.
  *  Note: reading this property returns different instances of RTCRtpSender.
@@ -183,13 +184,26 @@ RTC_EXPORT
            completionHandler:
     (nullable void (^)(NSError * _Nullable error))completionHandler;
 
+/** Limits the bandwidth allocated for all RTP streams sent by this
+ *  PeerConnection. Nil parameters will be unchanged. Setting
+ * |currentBitrateBps| will force the available bitrate estimate to the given
+ *  value. Returns YES if the parameters were successfully updated.
+ */
+- (BOOL)setBweMinBitrateBps:(nullable NSNumber *)minBitrateBps
+          currentBitrateBps:(nullable NSNumber *)currentBitrateBps
+              maxBitrateBps:(nullable NSNumber *)maxBitrateBps;
+
+/** Start or stop recording an Rtc EventLog. */
+- (BOOL)startRtcEventLogWithFilePath:(NSString *)filePath
+                      maxSizeInBytes:(int64_t)maxSizeInBytes;
+- (void)stopRtcEventLog;
+
 @end
 
 @interface RTCPeerConnection (Media)
 
-/**
- * Create an RTCRtpSender with the specified kind and media stream ID.
- * See RTCMediaStreamTrack.h for available kinds.
+/** Create an RTCRtpSender with the specified kind and media stream ID.
+ *  See RTCMediaStreamTrack.h for available kinds.
  */
 - (RTCRtpSender *)senderWithKind:(NSString *)kind streamId:(NSString *)streamId;
 
@@ -212,7 +226,7 @@ RTC_EXPORT
     (nullable RTCMediaStreamTrack *)mediaStreamTrack
      statsOutputLevel:(RTCStatsOutputLevel)statsOutputLevel
     completionHandler:
-    (nullable void (^)(NSArray<RTCStatsReport *> *stats))completionHandler;
+    (nullable void (^)(NSArray<RTCLegacyStatsReport *> *stats))completionHandler;
 
 @end
 
