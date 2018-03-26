@@ -36,9 +36,10 @@
 #import <WebRTC/RTCSessionDescription.h>
 #import <WebRTC/RTCVideoTrack.h>
 #import <WebRTC/RTCAudioTrack.h>
-#import <WebRTC/RTCAVFoundationVideoSource.h>
 #import <WebRTC/RTCDataChannelConfiguration.h>
 #import <WebRTC/RTCDataChannel.h>
+#import <WebRTC/RTCVideoCodecFactory.h>
+#import <WebRTC/RTCCameraVideoCapturer.h>
 
 typedef void(^SdpOfferBlock)(NSString *sdpOffer, NBMPeerConnection *connection);
 static NSString *kDefaultSTUNServerUrl = @"stun:stun.l.google.com:19302";
@@ -52,6 +53,7 @@ static NSString *kDefaultSTUNServerUrl = @"stun:stun.l.google.com:19302";
 @property (nonatomic, strong) RTCDataChannel *dataChannel;
 @property (nonatomic, strong) RTCMediaStream *localStream;
 @property (nonatomic, assign, readwrite) NBMCameraPosition cameraPosition;
+@property (nonatomic, strong, readwrite) RTCCameraVideoCapturer *capturer;
 
 @property (nonatomic, copy) SdpOfferBlock offerBlock;
 
@@ -69,7 +71,11 @@ static NSString *kDefaultSTUNServerUrl = @"stun:stun.l.google.com:19302";
         _delegate = delegate;
         _mediaConfiguration = configuration;
         //[RTCPeerConnectionFactory initialize];
-        _peerConnectionFactory = [[RTCPeerConnectionFactory alloc] init];
+        RTCDefaultVideoDecoderFactory *decoderFactory = [[RTCDefaultVideoDecoderFactory alloc] init];
+        RTCDefaultVideoEncoderFactory *encoderFactory = [[RTCDefaultVideoEncoderFactory alloc] init];
+        _peerConnectionFactory = [[RTCPeerConnectionFactory alloc]
+                                  initWithEncoderFactory:encoderFactory
+                                  decoderFactory:decoderFactory];
         _iceServers = [NSMutableArray arrayWithObject:[self defaultSTUNServer]];
         _connectionMap = [NSMutableDictionary dictionary];
     }
@@ -232,7 +238,7 @@ didReceiveMessageWithBuffer:(RTCDataBuffer *)buffer {
     
     [self.localStream removeAudioTrack:[self.localStream.audioTracks firstObject]];
     [self.localStream removeVideoTrack:[self.localStream.videoTracks firstObject]];
-    
+    [self stopCapture];
     self.localStream = nil;
 }
 
@@ -248,13 +254,14 @@ didReceiveMessageWithBuffer:(RTCDataBuffer *)buffer {
 - (void)selectCameraPosition:(NBMCameraPosition)cameraPosition {
     if (self.cameraPosition != cameraPosition) {
         self.cameraPosition = cameraPosition;
-        [self setupLocalVideo];
-        RTCPeerConnection *localPeerConnection = self.localPeerConnection.peerConnection;
-        if (localPeerConnection) {
-            RTCMediaStream *oldLocalStream = [localPeerConnection.localStreams firstObject];
-            [localPeerConnection removeStream:oldLocalStream];
-            [localPeerConnection addStream:self.localStream];
-        }
+        [self startCapture];
+//        [self setupLocalVideo];
+//        RTCPeerConnection *localPeerConnection = self.localPeerConnection.peerConnection;
+//        if (localPeerConnection) {
+//            RTCMediaStream *oldLocalStream = [localPeerConnection.localStreams firstObject];
+//            [localPeerConnection removeStream:oldLocalStream];
+//            [localPeerConnection addStream:self.localStream];
+//        }
     }
 }
 
@@ -269,7 +276,16 @@ didReceiveMessageWithBuffer:(RTCDataBuffer *)buffer {
 }
 
 - (void)enableVideo:(BOOL)enable {
-    [self.localStream setVideoEnabled:enable];
+    if (self.isVideoEnabled != enable){
+        [self.localStream setVideoEnabled:enable];
+        dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(0.1 * NSEC_PER_SEC)), dispatch_get_main_queue(), ^{
+            if (enable) {
+                [self startCapture];
+            } else {
+                [self stopCapture];
+            }
+        });
+    }
 }
 
 - (BOOL)isAudioEnabled {
@@ -326,6 +342,69 @@ didReceiveMessageWithBuffer:(RTCDataBuffer *)buffer {
 }
 
 #pragma mark - Private
+- (void)startCapture {
+    AVCaptureDevicePosition position =
+    self.mediaConfiguration.cameraPosition == NBMCameraPositionFront ? AVCaptureDevicePositionFront : AVCaptureDevicePositionBack;
+    AVCaptureDevice *device = [self findDeviceForPosition:position];
+    AVCaptureDeviceFormat *format = [self selectFormatForDevice:device];
+    
+    if (format == nil) {
+        DDLogError(@"No valid formats for device %@", device);
+        NSAssert(NO, @"");
+        return;
+    }
+    
+    NSInteger fps = [self selectFpsForFormat:format];
+    
+    [_capturer startCaptureWithDevice:device format:format fps:fps];
+}
+
+- (void)stopCapture {
+    [_capturer stopCapture];
+}
+
+- (AVCaptureDevice *)findDeviceForPosition:(AVCaptureDevicePosition)position {
+    NSArray<AVCaptureDevice *> *captureDevices = [RTCCameraVideoCapturer captureDevices];
+    for (AVCaptureDevice *device in captureDevices) {
+        if (device.position == position) {
+            return device;
+        }
+    }
+    return captureDevices[0];
+}
+
+- (AVCaptureDeviceFormat *)selectFormatForDevice:(AVCaptureDevice *)device {
+    NSArray<AVCaptureDeviceFormat *> *formats =
+    [RTCCameraVideoCapturer supportedFormatsForDevice:device];
+    CMVideoDimensions prefDimensions = self.mediaConfiguration.receiverVideoFormat.dimensions;
+    int targetWidth = prefDimensions.width;
+    int targetHeight = prefDimensions.height;
+    AVCaptureDeviceFormat *selectedFormat = nil;
+    int currentDiff = INT_MAX;
+    DDLogVerbose(@"supportedFormatsForDevice:\n%@", formats);
+    for (AVCaptureDeviceFormat *format in formats) {
+        CMVideoDimensions dimension = CMVideoFormatDescriptionGetDimensions(format.formatDescription);
+        FourCharCode pixelFormat = CMFormatDescriptionGetMediaSubType(format.formatDescription);
+        int diff = abs(targetWidth - dimension.width) + abs(targetHeight - dimension.height);
+        if (diff < currentDiff) {
+            selectedFormat = format;
+            currentDiff = diff;
+        } else if (diff == currentDiff && pixelFormat == [_capturer preferredOutputPixelFormat]) {
+            selectedFormat = format;
+        }
+    }
+    
+    return selectedFormat;
+}
+
+- (NSInteger)selectFpsForFormat:(AVCaptureDeviceFormat *)format {
+    Float64 maxFramerate = self.mediaConfiguration.receiverVideoFormat.frameRate;
+    for (AVFrameRateRange *fpsRange in format.videoSupportedFrameRateRanges) {
+        maxFramerate = fmin(maxFramerate, fpsRange.maxFrameRate);
+    }
+    return maxFramerate;
+}
+
 
 - (NSUInteger)connectionCount
 {
@@ -447,11 +526,7 @@ didReceiveMessageWithBuffer:(RTCDataBuffer *)buffer {
 }
 
 - (void)setupLocalVideo {
-    [self setupLocalVideoWithConstraints:nil];
-}
-
-- (void)setupLocalVideoWithConstraints:(RTCMediaConstraints *)videoConstraints {
-    RTCVideoTrack *videoTrack = [self localVideoTrackWithConstraints:videoConstraints];
+    RTCVideoTrack *videoTrack = [self localVideoTrack];
     if (self.localStream && videoTrack) {
         RTCVideoTrack *oldVideoTrack = [self.localStream.videoTracks firstObject];
         if (oldVideoTrack) {
@@ -461,17 +536,22 @@ didReceiveMessageWithBuffer:(RTCDataBuffer *)buffer {
     }
 }
 
-- (RTCVideoTrack *)localVideoTrackWithConstraints:(RTCMediaConstraints *)videoConstraints {
-    NSString *cameraId = [self cameraDevice:self.cameraPosition];
-    
-    NSAssert(cameraId, @"Unable to get camera id");
-    
-    RTCAVFoundationVideoSource* videoSource = [self.peerConnectionFactory avFoundationVideoSourceWithConstraints:videoConstraints];
-    if (self.cameraPosition == NBMCameraPositionBack) {
-        [videoSource setUseBackCamera:YES];
+- (RTCVideoTrack *)localVideoTrack {
+    RTCVideoSource *source = [self.peerConnectionFactory videoSource];
+    #if !TARGET_IPHONE_SIMULATOR
+    RTCCameraVideoCapturer *capturer = [[RTCCameraVideoCapturer alloc] initWithDelegate:source];
+    self.capturer = capturer;
+    [self startCapture];
+    [_delegate webRTCPeer:self didCreateLocalCapturer:capturer];
+    #else
+    #if defined(__IPHONE_11_0) && (__IPHONE_OS_VERSION_MAX_ALLOWED >= __IPHONE_11_0)
+    if (@available(iOS 10, *)) {
+        RTCFileVideoCapturer *fileCapturer = [[RTCFileVideoCapturer alloc] initWithDelegate:source];
+        [_delegate webRTCPeer:self didCreateLocalFileCapturer:fileCapturer];
     }
-    
-    RTCVideoTrack *videoTrack = [self.peerConnectionFactory videoTrackWithSource:videoSource trackId:[self videoTrackId]];
+    #endif
+    #endif
+    RTCVideoTrack *videoTrack = [self.peerConnectionFactory videoTrackWithSource:source trackId:[self videoTrackId]];
     
     return videoTrack;
 }
@@ -565,6 +645,7 @@ didReceiveMessageWithBuffer:(RTCDataBuffer *)buffer {
     _localPeerConnection = nil;
     _localStream = nil;
     _peerConnectionFactory = nil;
+    _capturer = nil;
 }
 
 #pragma mark - RTCPeerConnectionDelegate
@@ -661,6 +742,12 @@ didReceiveMessageWithBuffer:(RTCDataBuffer *)buffer {
     didOpenDataChannel:(RTCDataChannel *)dataChannel {
 
 }
+
+- (void)peerConnection:(nonnull RTCPeerConnection *)peerConnection didRemoveIceCandidates:(nonnull NSArray<RTCIceCandidate *> *)candidates {
+    NBMPeerConnection *connection = [self wrapperForConnection:peerConnection];
+    DDLogError(@"Peer connection %@ - didRemoveIceCandidates unimplemented", connection.connectionId);
+}
+
 
 #pragma mark - RTCSessionDescriptionDelegate
 

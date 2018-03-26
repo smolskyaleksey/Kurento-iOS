@@ -27,6 +27,8 @@
 @class RTCMediaStream;
 @class RTCSessionDescription;
 @class RTCIceCandidate;
+@class RTCCameraVideoCapturer;
+@class RTCFileVideoCapturer;
 
 /**
  *  NBMWebRTCPeerDelegate is a protocol for an object that must be
@@ -90,6 +92,11 @@
 
 - (void)webRTCPeer:(NBMWebRTCPeer *)peer didAddDataChannel:(RTCDataChannel *)dataChannel;
 
+- (void)webRTCPeer:(NBMWebRTCPeer *)peer didCreateLocalCapturer:(RTCCameraVideoCapturer *)localCapturer;
+
+@optional
+- (void)webRTCPeer:(NBMWebRTCPeer *)peer didCreateLocalFileCapturer:(RTCFileVideoCapturer *)fileCapturer;
+
 @end
 
 /**
@@ -106,7 +113,7 @@
  *  The local stream.
  */
 @property (nonatomic, strong, readonly) RTCMediaStream *localStream;
-
+@property (nonatomic, strong, readonly) RTCCameraVideoCapturer *capturer;
 @property (nonatomic, assign, readonly) NBMCameraPosition cameraPosition;
 
 /**
