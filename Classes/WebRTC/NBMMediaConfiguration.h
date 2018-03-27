@@ -18,6 +18,7 @@
 #import <Foundation/Foundation.h>
 #import <CoreMedia/CoreMedia.h>
 #import "NBMTypes.h"
+#import <WebRTC/RTCIceServer.h>
 
 
 @interface NBMMediaConfiguration : NSObject <NSCopying>
@@ -29,6 +30,7 @@
 @property (nonatomic, assign) NSUInteger videoBandwidth;
 @property (nonatomic, assign) NBMVideoFormat receiverVideoFormat;
 @property (nonatomic, assign) NBMCameraPosition cameraPosition;
+@property (nonatomic, strong) NSMutableArray<RTCIceServer *> *iceServers;
 
 /*
  NBMAudioCodecOpus

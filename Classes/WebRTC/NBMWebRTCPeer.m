@@ -71,6 +71,11 @@ static NSString *kDefaultSTUNServerUrl = @"stun:stun.l.google.com:19302";
         //[RTCPeerConnectionFactory initialize];
         _peerConnectionFactory = [[RTCPeerConnectionFactory alloc] init];
         _iceServers = [NSMutableArray arrayWithObject:[self defaultSTUNServer]];
+        if (configuration.iceServers != nil) {
+            _iceServers = configuration.iceServers;
+        } else {
+            _iceServers = [NSMutableArray arrayWithObject:[self defaultSTUNServer]];
+        }
         _connectionMap = [NSMutableDictionary dictionary];
     }
     
