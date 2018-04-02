@@ -113,36 +113,50 @@ static NSString *kDefaultSTUNServerUrl = @"stun:stun.l.google.com:19302";
     //TODO:Renegotiate active connections
 }
 
-- (void)generateOffer:(NSString *)connectionId completion:(void(^)(NSString *sdpOffer, NBMPeerConnection *connection))block {
-    [self generateOffer:connectionId withDataChannels:NO completion:block];
+- (void)generateOffer:(NSString *)connectionId withLocalPeer:(BOOL)isLocal completion:(void(^)(NSString *sdpOffer, NBMPeerConnection *connection))block {
+    [self generateOffer:connectionId withLocalPeer:isLocal withDataChannels:NO completion:block];
 }
 
-- (void)generateOffer:(NSString *)connectionId {
-    [self generateOffer:connectionId withDataChannels:NO];
+- (void)generateOffer:(NSString *)connectionId withLocalPeer:(BOOL)isLocal {
+    [self generateOffer:connectionId withLocalPeer:isLocal withDataChannels:NO];
 }
 
-- (void)generateOffer:(NSString *)connectionId withDataChannels:(BOOL)dataChannels completion:(void(^)(NSString *sdpOffer, NBMPeerConnection *connection))block {
+- (void)generateOffer:(NSString *)connectionId withLocalPeer:(BOOL)isLocal withDataChannels:(BOOL)dataChannels completion:(void(^)(NSString *sdpOffer, NBMPeerConnection *connection))block {
     self.offerBlock = block;
-    [self generateOffer:connectionId withDataChannels:dataChannels];
+    [self generateOffer:connectionId withLocalPeer:isLocal withDataChannels:dataChannels];
 }
 
-- (void)generateOffer:(NSString *)connectionId withDataChannels:(BOOL)dataChannels {
+- (void)generateOffer:(NSString *)connectionId withLocalPeer:(BOOL)isLocal withDataChannels:(BOOL)dataChannels {
     NSParameterAssert(connectionId);
     
-//    if (!self.localStream) {
-//        [self startLocalMedia];
-//    }
-   
+    //    if (!self.localStream) {
+    //        [self startLocalMedia];
+    //    }
+    
     NBMPeerConnection *connection = self.connectionMap[connectionId];
-//    if (connection) {
-//        DDLogWarn(@"Connection already exixts - id: %@", connectionId);
-//        return;
-//    }
+    //    if (connection) {
+    //        DDLogWarn(@"Connection already exixts - id: %@", connectionId);
+    //        return;
+    //    }
     if (!connection) {
         connection = [self connectionWrapperWithConnectionId:connectionId servers:_iceServers];
     }
     connection.isInitiator = YES;
-    RTCMediaConstraints *constraints = [NBMSessionDescriptionFactory offerConstraints];
+    RTCMediaConstraints *constraints = nil;
+    if (isLocal){
+        
+        constraints = [[RTCMediaConstraints alloc] initWithMandatoryConstraints:@{
+                                                                                  @"OfferToReceiveAudio": @"false",
+                                                                                  @"OfferToReceiveVideo": @"false"
+                                                                                  }
+                                                            optionalConstraints:@{
+                                                                                  @"internalSctpDataChannels": @"true",
+                                                                                  @"DtlsSrtpKeyAgreement": @"true"
+                                                                                  }];
+    }else {
+        constraints = [NBMSessionDescriptionFactory offerConstraints];
+    }
+    
     __block RTCPeerConnection* peerConnection = connection.peerConnection;
     
     BOOL isLocalPeerConnection = [[self.connectionMap allKeys] count] == 0;
@@ -157,12 +171,12 @@ static NSString *kDefaultSTUNServerUrl = @"stun:stun.l.google.com:19302";
             [_dataChannel setDelegate:self];
         }
     }
-
+    
     [connection.peerConnection offerForConstraints:constraints completionHandler:^(RTCSessionDescription * _Nullable sdp, NSError * _Nullable error) {
         [self peerConnection:peerConnection didCreateSessionDescription:sdp error:error];
     }];
     //[connection.peerConnection createOfferWithDelegate:self constraints:constraints];
-
+    
     self.connectionMap[connectionId] = connection;
     
     //TODO:Renegotiate active connections
