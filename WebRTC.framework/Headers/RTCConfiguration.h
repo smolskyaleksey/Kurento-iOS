@@ -65,7 +65,6 @@ typedef NS_ENUM(NSInteger, RTCEncryptionKeyType) {
 
 /** Represents the chosen SDP semantics for the RTCPeerConnection. */
 typedef NS_ENUM(NSInteger, RTCSdpSemantics) {
-  RTCSdpSemanticsDefault,
   RTCSdpSemanticsPlanB,
   RTCSdpSemanticsUnifiedPlan,
 };
@@ -155,16 +154,19 @@ RTC_EXPORT
  *  will also cause RTCPeerConnection to ignore all but the first a=ssrc lines
  *  that form a Plan B stream.
  *
- *  For users who only send at most one audio and one video track, this
- *  choice does not matter and should be left as Default.
- *
  *  For users who wish to send multiple audio/video streams and need to stay
- *  interoperable with legacy WebRTC implementations, specify PlanB.
+ *  interoperable with legacy WebRTC implementations or use legacy APIs,
+ *  specify PlanB.
  *
- *  For users who wish to send multiple audio/video streams and/or wish to
- *  use the new RTCRtpTransceiver API, specify UnifiedPlan.
+ *  For all other users, specify UnifiedPlan.
  */
 @property(nonatomic, assign) RTCSdpSemantics sdpSemantics;
+
+/** Actively reset the SRTP parameters when the DTLS transports underneath are
+ *  changed after offer/answer negotiation. This is only intended to be a
+ *  workaround for crbug.com/835958
+ */
+@property(nonatomic, assign) BOOL activeResetSrtpParams;
 
 - (instancetype)init;
 
